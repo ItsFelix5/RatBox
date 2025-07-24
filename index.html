@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>RatBox</title>
+		<link rel="icon" type="image/svg+xml" href="/rat.svg" />
+		<style>
+			* {
+				color: white;
+			}
+			body {
+				font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif, sans-serif;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: center;
+				height: 100vh;
+				margin: 0;
+				background-color: #2b2b2b;
+				gap: 20px;
+			}
+			.game {
+				background-color: #202020;
+				padding: 8px;
+				border-radius: 10px;
+				margin-bottom: 50px;
+				box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5);
+			}
+			.grid {
+				display: grid;
+				grid-template-columns: repeat(10, 40px);
+				grid-template-rows: repeat(10, 40px);
+				gap: 8px;
+			}
+			.deck,
+			.controls {
+				background-color: #202020;
+				padding: 8px;
+				display: flex;
+				border-radius: 10px;
+				gap: 8px;
+				flex-wrap: wrap;
+				justify-content: center;
+			}
+			.deck {
+				position: absolute;
+				bottom: 20px;
+				box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5);
+			}
+			.controls {
+				position: absolute;
+				top: 20px;
+				right: 20px;
+				box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5);
+			}
+			.cell,
+			.deck-cell {
+				width: 40px;
+				height: 40px;
+				box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5);
+				border-radius: 10px;
+				display: flex;
+				justify-content: center;
+				align-items: center;
+				font-family: sans-serif;
+				font-weight: bold;
+				user-select: none;
+			}
+			pre {
+				background-color: #2b2b2b;
+				padding: 10px;
+				border-radius: 10px;
+			}
+			button {
+				padding: 6px 12px;
+				font-size: 14px;
+				border: none;
+				border-radius: 6px;
+				background-color: #2ecc71;
+				cursor: pointer;
+			}
+			.editable [draggable='true'] {
+				cursor: grab;
+			}
+			[type='rat'] {
+				background-image: url('rat.svg');
+			}
+			[type='rotator'] {
+				background-image: url('rotator.svg');
+			}
+			[type='duplicator'] {
+				background-image: url('multiply.svg');
+			}
+			[type='cheese'] {
+				background-image: url('cheese.svg');
+				box-shadow: 0 0 rgba(0, 0, 0, 0);
+			}
+			[type='wall'] {
+				box-shadow: 0 0 rgba(0, 0, 0, 0);
+			}
+		</style>
+		<script src="https://cdn.jsdelivr.net/npm/@tsparticles/confetti@3.0.3/tsparticles.confetti.bundle.min.js"></script>
+		<script type="module">
+			const immutable = ['rat', 'wall', 'cheese'];
+			const levels = await fetch('levels.json').then(response => response.json());
+			const level = levels[Math.floor(Date.now() / 86400000) % levels.length];
+			const cheeseCount = level[0].filter(cell => cell === 'cheese').length;
+			const deckItems = Object.entries(level[1]).flatMap(([type, count]) => Array.from({ length: count }, () => type));
+			let initialState = level[0].map(cell => ({ type: cell, rotation: 0 }));
+
+			const startTime = Date.now();
+			let interval = null;
+			const grid = document.getElementById('grid');
+			const deck = document.getElementById('deck');
+			const toggleBtn = document.getElementById('toggle');
+			const resetBtn = document.getElementById('reset');
+			let cheese = 0;
+
+			function createDeck() {
+				deck.innerHTML = '';
+				for (let i = 0; i < deckItems.length; i++) {
+					const div = document.createElement('div');
+					div.className = 'deck-cell';
+					div.setAttribute('type', deckItems[i]);
+					div.setAttribute('draggable', 'true');
+					const uniqueId = `deck-cell-${i}`;
+					div.id = uniqueId;
+
+					div.addEventListener('dragstart', dragstart);
+					div.addEventListener('dragover', e => e.preventDefault());
+					div.addEventListener('drop', drop);
+
+					deck.appendChild(div);
+				}
+			}
+
+			function createGrid() {
+				grid.innerHTML = '';
+				grid.classList.add('editable');
+				for (let i = 0; i < initialState.length; i++) {
+					const cell = initialState[i];
+					const div = document.createElement('div');
+					div.className = 'cell';
+
+					div.id = `cell-${i}`;
+					if (cell.type) {
+						div.setAttribute('type', cell.type);
+						if (!immutable.includes(cell.type)) {
+							div.setAttribute('draggable', 'true');
+							div.addEventListener('dragstart', dragstart);
+						}
+					}
+					if (cell.rotation) {
+						div.setAttribute('rotation', cell.rotation);
+						div.style.transform = `rotate(${div.getAttribute('rotation')}deg)`;
+					}
+
+					div.addEventListener('click', () => {
+						if (!initialState && !immutable.includes(div.getAttribute('type'))) rotate(div);
+					});
+
+					div.addEventListener('dragover', e => e.preventDefault());
+					div.addEventListener('drop', drop);
+
+					grid.appendChild(div);
+				}
+
+				initialState = null;
+			}
+
+			function dragstart(e) {
+				if (initialState) e.preventDefault();
+				else e.dataTransfer.setData('id', e.target.id);
+			}
+
+			function drop(e) {
+				e.preventDefault();
+				move(document.getElementById(e.dataTransfer.getData('id')), e.target);
+			}
+
+			function move(from, to) {
+				const type = from.getAttribute('type');
+				if (immutable.includes(type)) return;
+				const rotation = from.getAttribute('rotation') || '0';
+
+				if (to.hasAttribute('type')) {
+					from.setAttribute('type', to.getAttribute('type'));
+					from.setAttribute('rotation', to.getAttribute('rotation') || '0');
+					from.style.transform = `rotate(${from.getAttribute('rotation')}deg)`;
+				} else {
+					from.removeAttribute('type');
+					from.removeAttribute('rotation');
+					from.removeAttribute('draggable');
+					from.removeEventListener('dragstart', dragstart);
+				}
+
+				to.setAttribute('type', type);
+				to.setAttribute('rotation', rotation);
+				to.style.transform = `rotate(${to.getAttribute('rotation')}deg)`;
+				to.setAttribute('draggable', 'true');
+				to.addEventListener('dragstart', dragstart);
+			}
+
+			function rotate(cell) {
+				if (!cell.hasAttribute('type')) return;
+				const rotation = parseInt(cell.getAttribute('rotation') || '0') + 90;
+				cell.setAttribute('rotation', rotation);
+				cell.style.transition = 'transform 0.2s';
+				cell.style.transform = `rotate(${rotation}deg)`;
+				setTimeout(() => {
+					cell.style.transition = '';
+				}, 200);
+			}
+
+			function moveCells() {
+				const cells = Array.from(grid.children);
+				const rats = [];
+				for (let i = 0; i < cells.length; i++) {
+					const cell = cells[i];
+					switch (cell.getAttribute('type')) {
+						case 'rotator':
+							[-10, -1, 0, 1, 10].forEach(modifier => {
+								const target = cells[i + modifier];
+								rotate(target);
+							});
+							break;
+						case 'rat':
+							rats.push(i);
+							break;
+					}
+				}
+
+				rats.forEach(index => {
+					const cell = cells[index];
+					let modifier;
+					switch (parseInt(cell.getAttribute('rotation')) % 360) {
+						case 90:
+							modifier = -10;
+							break;
+						case 180:
+							modifier = 1;
+							break;
+						case 270:
+							modifier = 10;
+							break;
+						default:
+							modifier = -1;
+					}
+					push(index, modifier);
+				});
+			}
+
+			function push(index, modifier) {
+				const cell = grid.children[index];
+				const forward = index + modifier;
+				const to = grid.children[forward];
+				if (!to || (Math.abs(modifier) == 1 && Math.floor(index / 10) != Math.floor(forward / 10))) return false;
+
+				switch (to.getAttribute('type')) {
+					case 'cheese':
+						if (++cheese >= cheeseCount) {
+							document.querySelector('.controls').style.display = 'none';
+							deck.style.display = 'none';
+							grid.classList.remove('grid');
+							grid.style.padding = '30px';
+							const text = `[🐀 Ratbox #${(Math.floor(Date.now() / 86400000) % levels.length) + 1}]
+⬛ ${deckItems.length - Array.from(deck.children).filter(c => c.hasAttribute('type')).length}/${deckItems.length}
+📆 ${new Date().toLocaleDateString()}
+⏱️ ${Math.floor((Date.now() - startTime) / 1000)}s
+🌐 ${location.href}`;
+							grid.innerHTML = `<h1>You win!</h1><pre><code>${text}</code></pre>`;
+							const copy = document.createElement('button');
+							copy.textContent = 'Copy';
+							copy.addEventListener('click', () => {
+								navigator.clipboard.writeText(text);
+								copy.textContent = 'Copied!';
+							});
+							grid.appendChild(copy);
+
+							(function frame() {
+								confetti({
+									particleCount: 1,
+									angle: 0,
+									spread: 90,
+									origin: { x: 0, y: 0 }
+								});
+
+								confetti({
+									particleCount: 1,
+									angle: 9,
+									spread: 90,
+									origin: { x: 1, y: 0 }
+								});
+
+								requestAnimationFrame(frame);
+							})();
+						}
+					case null:
+						to.setAttribute('type', cell.getAttribute('type'));
+						to.setAttribute('rotation', cell.getAttribute('rotation') || '0');
+						to.style.transform = `rotate(${to.getAttribute('rotation')}deg)`;
+						to.setAttribute('draggable', 'true');
+						to.addEventListener('dragstart', dragstart);
+						cell.removeAttribute('type');
+						cell.removeAttribute('rotation');
+						cell.removeAttribute('draggable');
+						cell.removeEventListener('dragstart', dragstart);
+						break;
+					case 'wall':
+						return false;
+					case 'duplicator':
+						to.setAttribute('type', cell.getAttribute('type'));
+						to.setAttribute('rotation', cell.getAttribute('rotation') || '0');
+						to.style.transform = `rotate(${to.getAttribute('rotation')}deg)`;
+						to.setAttribute('draggable', 'true');
+						to.addEventListener('dragstart', dragstart);
+						return false;
+					default:
+						if (push(forward, modifier)) move(cell, to);
+				}
+				return true;
+			}
+
+			toggleBtn.addEventListener('click', () => {
+				if (interval) {
+					clearInterval(interval);
+					interval = null;
+					toggleBtn.textContent = 'Play';
+				} else {
+					interval = setInterval(moveCells, 500);
+					toggleBtn.textContent = 'Pause';
+					resetBtn.textContent = 'Reset';
+					if (!initialState)
+						initialState = Array.from(grid.children).map(cell => ({
+							type: cell.getAttribute('type'),
+							rotation: parseInt(cell.getAttribute('rotation') || '0')
+						}));
+					grid.classList.remove('editable');
+				}
+			});
+
+			resetBtn.addEventListener('click', () => {
+				if (initialState) {
+					clearInterval(interval);
+					interval = null;
+					toggleBtn.textContent = 'Play';
+					resetBtn.textContent = 'Clear';
+					createGrid();
+					cheese = 0;
+				} else {
+					initialState = level[0].map(cell => ({ type: cell, rotation: 0 }));
+					createGrid();
+					createDeck();
+				}
+			});
+
+			createGrid();
+			createDeck();
+		</script>
+	</head>
+	<body>
+		<div class="game grid" id="grid"></div>
+		<div class="deck editable" id="deck"></div>
+		<div class="controls">
+			<button id="toggle">Play</button>
+			<button id="reset">Clear</button>
+		</div>
+		<div id="tsparticles"></div>
+	</body>
+</html>
