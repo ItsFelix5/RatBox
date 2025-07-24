@@ -181,7 +181,6 @@
 
 			function move(from, to) {
 				const type = from.getAttribute('type');
-				if (immutable.includes(type)) return;
 				const rotation = from.getAttribute('rotation') || '0';
 
 				if (to.hasAttribute('type')) {
