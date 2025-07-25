@@ -54,18 +54,17 @@
 				right: 20px;
 				box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5);
 			}
-			.cell,
-			.deck-cell {
+			.cell {
 				width: 40px;
 				height: 40px;
 				box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5);
 				border-radius: 10px;
-				display: flex;
-				justify-content: center;
-				align-items: center;
-				font-family: sans-serif;
-				font-weight: bold;
-				user-select: none;
+				background: linear-gradient(135deg, #202020 60%, #242424 100%);
+			}
+			.editable .hint {
+				width: 100%;
+				height: 100%;
+				border-radius: 10px;
 			}
 			pre {
 				background-color: #2b2b2b;
@@ -85,28 +84,41 @@
 			}
 			[type='rat'] {
 				background-image: url('rat.svg');
+				filter: drop-shadow(1px 1px 5px rgba(102, 117, 127, 0.3));
 			}
 			[type='rotator'] {
 				background-image: url('rotator.svg');
+				filter: drop-shadow(1px 1px 5px rgba(59, 136, 195, 0.3));
+			}
+			[type='copier'] {
+				background-image: url('arrow.svg');
+				filter: drop-shadow(1px 1px 5px rgba(59, 136, 195, 0.3));
 			}
 			[type='duplicator'] {
 				background-image: url('multiply.svg');
+				filter: drop-shadow(1px 1px 5px rgba(49, 55, 61, 0.3));
+			}
+			[type='block'] {
+				background-image: url('block.svg');
+				filter: drop-shadow(1px 1px 5px rgba(255, 255, 255, 0.3));
 			}
 			[type='cheese'] {
 				background-image: url('cheese.svg');
-				box-shadow: 0 0 rgba(0, 0, 0, 0);
+				filter: drop-shadow(1px 1px 5px rgba(255, 172, 51, 0.3));
 			}
 			[type='wall'] {
 				box-shadow: 0 0 rgba(0, 0, 0, 0);
+				background: none;
 			}
 		</style>
 		<script src="https://cdn.jsdelivr.net/npm/@tsparticles/confetti@3.0.3/tsparticles.confetti.bundle.min.js"></script>
 		<script type="module">
 			const immutable = ['rat', 'wall', 'cheese'];
 			const levels = await fetch('levels.json').then(response => response.json());
-			const level = levels[Math.floor(Date.now() / 86400000) % levels.length];
+			const level = levels[Math.floor(Date.now() / 86400000 + 1) % levels.length];
 			const cheeseCount = level[0].filter(cell => cell === 'cheese').length;
-			const deckItems = Object.entries(level[1]).flatMap(([type, count]) => Array.from({ length: count }, () => type));
+			const deckItems = Object.entries(level[2]).flatMap(([type, count]) => Array.from({ length: count }, () => type));
+			const hintCount = level[1].filter((cell, i) => cell != level[0][i]).length;
 			let initialState = level[0].map(cell => ({ type: cell, rotation: 0 }));
 
 			const startTime = Date.now();
@@ -114,14 +126,17 @@
 			const grid = document.getElementById('grid');
 			const deck = document.getElementById('deck');
 			const toggleBtn = document.getElementById('toggle');
+			const stepBtn = document.getElementById('step');
 			const resetBtn = document.getElementById('reset');
+			const hintBtn = document.getElementById('hint');
 			let cheese = 0;
+			let hints = [];
 
 			function createDeck() {
 				deck.innerHTML = '';
 				for (let i = 0; i < deckItems.length; i++) {
 					const div = document.createElement('div');
-					div.className = 'deck-cell';
+					div.className = 'cell';
 					div.setAttribute('type', deckItems[i]);
 					div.setAttribute('draggable', 'true');
 					const uniqueId = `deck-cell-${i}`;
@@ -156,8 +171,16 @@
 						div.style.transform = `rotate(${div.getAttribute('rotation')}deg)`;
 					}
 
+					if (hints.includes(i)) {
+						const hint = document.createElement('div');
+						hint.className = 'hint';
+						hint.setAttribute('type', level[1][i]);
+						hint.style.opacity = '0.5';
+						div.appendChild(hint);
+					}
+
 					div.addEventListener('click', () => {
-						if (!initialState && !immutable.includes(div.getAttribute('type'))) rotate(div);
+						if (!initialState) rotate(div);
 					});
 
 					div.addEventListener('dragover', e => e.preventDefault());
@@ -176,7 +199,7 @@
 
 			function drop(e) {
 				e.preventDefault();
-				move(document.getElementById(e.dataTransfer.getData('id')), e.target);
+				move(document.getElementById(e.dataTransfer.getData('id')), e.target.classList.contains('hint') ? e.target.parentElement : e.target);
 			}
 
 			function move(from, to) {
@@ -221,9 +244,44 @@
 					switch (cell.getAttribute('type')) {
 						case 'rotator':
 							[-10, -1, 0, 1, 10].forEach(modifier => {
-								const target = cells[i + modifier];
-								rotate(target);
+								if (Math.abs(modifier) != 1 || Math.floor(i / 10) == Math.floor((i + modifier) / 10)) rotate(cells[i + modifier]);
 							});
+							break;
+						case 'copier':
+							let modifier;
+							switch (parseInt(cell.getAttribute('rotation')) % 360) {
+								case 90:
+									modifier = -10;
+									break;
+								case 180:
+									modifier = 1;
+									break;
+								case 270:
+									modifier = 10;
+									break;
+								default:
+									modifier = -1;
+							}
+							const backward = cells[i - modifier];
+							const forward = cells[i + modifier];
+							if (
+								!backward ||
+								!forward ||
+								!backward.getAttribute('type') ||
+								backward.getAttribute('type') == 'cheese' ||
+								forward.getAttribute('type') == 'wall' ||
+								(Math.abs(modifier) == 1 && Math.floor((i - modifier) / 10) != Math.floor((i + modifier) / 10))
+							)
+								continue;
+							if (forward.getAttribute('type')) {
+								if (!push(i + modifier, modifier)) continue;
+							}
+
+							forward.setAttribute('type', backward.getAttribute('type'));
+							forward.setAttribute('rotation', backward.getAttribute('rotation') || '0');
+							forward.style.transform = `rotate(${forward.getAttribute('rotation')}deg)`;
+							forward.setAttribute('draggable', 'true');
+							forward.addEventListener('dragstart', dragstart);
 							break;
 						case 'rat':
 							rats.push(i);
@@ -265,9 +323,11 @@
 							grid.classList.remove('grid');
 							grid.style.padding = '30px';
 							const text = `[🐀 Ratbox #${(Math.floor(Date.now() / 86400000) % levels.length) + 1}]
-⬛ ${deckItems.length - Array.from(deck.children).filter(c => c.hasAttribute('type')).length}/${deckItems.length}
+💡 ${hints.length}/${hintCount} hints used
+⬛ ${deckItems.length - Array.from(deck.children).filter(c => c.hasAttribute('type')).length}/${deckItems.length} items used
 📆 ${new Date().toLocaleDateString()}
-⏱️ ${Math.floor((Date.now() - startTime) / 1000)}s
+⏱️ ${Math.floor((Date.now() - startTime) / 60000)}m ${Math.floor(((Date.now() - startTime) / 1000) % 60)}s
+✅ ${initialState.every((cell, i) => cell.type == level[1][i]) ? 'intended' : 'unintended'} solution
 🌐 ${location.href}`;
 							grid.innerHTML = `<h1>You win!</h1><pre><code>${text}</code></pre>`;
 							const copy = document.createElement('button');
@@ -316,6 +376,7 @@
 						return false;
 					default:
 						if (push(forward, modifier)) move(cell, to);
+						else return false;
 				}
 				return true;
 			}
@@ -331,11 +392,22 @@
 					resetBtn.textContent = 'Reset';
 					if (!initialState)
 						initialState = Array.from(grid.children).map(cell => ({
-							type: cell.getAttribute('type'),
+							type: cell.getAttribute('type') || '',
 							rotation: parseInt(cell.getAttribute('rotation') || '0')
 						}));
 					grid.classList.remove('editable');
 				}
+			});
+
+			stepBtn.addEventListener('click', () => {
+				resetBtn.textContent = 'Reset';
+				if (!initialState)
+					initialState = Array.from(grid.children).map(cell => ({
+						type: cell.getAttribute('type') || '',
+						rotation: parseInt(cell.getAttribute('rotation') || '0')
+					}));
+				grid.classList.remove('editable');
+				moveCells();
 			});
 
 			resetBtn.addEventListener('click', () => {
@@ -353,6 +425,29 @@
 				}
 			});
 
+			hintBtn.addEventListener('click', () => {
+				if (hints.length >= hintCount) {
+					alert('No more hints available!');
+					return;
+				}
+				if (!confirm('Are you sure you want to stoop so low as to use a hint?\n(Hints are not rotated)')) return;
+				const cells = Array.from(grid.children);
+				const indexMap = Array.from({ length: cells.length }, (_, i) => i).sort(() => Math.random() - 0.5);
+				for (let i = 0; i < cells.length; i++) {
+					const index = indexMap[i];
+					const cell = cells[index];
+					if (level[1][index] != (cell.getAttribute('type') || '') && cell.children.length === 0) {
+						hints.push(index);
+						const hint = document.createElement('div');
+						hint.className = 'hint';
+						hint.setAttribute('type', level[1][index]);
+						hint.style.opacity = '0.5';
+						cell.appendChild(hint);
+						return;
+					}
+				}
+			});
+
 			createGrid();
 			createDeck();
 		</script>
@@ -362,8 +457,9 @@
 		<div class="deck editable" id="deck"></div>
 		<div class="controls">
 			<button id="toggle">Play</button>
+			<button id="step">Step</button>
 			<button id="reset">Clear</button>
+			<button id="hint">Hint</button>
 		</div>
-		<div id="tsparticles"></div>
 	</body>
 </html>
