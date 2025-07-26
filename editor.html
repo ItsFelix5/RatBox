@@ -3,7 +3,7 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>RatBox</title>
+		<title>RatBox Editor</title>
 		<link rel="icon" type="image/svg+xml" href="rat.svg" />
 		<style>
 			* {
@@ -62,11 +62,6 @@
 				border-radius: 10px;
 				background: linear-gradient(135deg, #202020 60%, #242424 100%);
 			}
-			.editable .hint {
-				width: 100%;
-				height: 100%;
-				border-radius: 10px;
-			}
 			pre {
 				background-color: #2b2b2b;
 				padding: 10px;
@@ -116,31 +111,8 @@
 		<script type="module">
 			const items = ['rat', 'rotator', 'copier', 'duplicator', 'block', 'cheese', 'wall'];
 			const immutable = ['rat', 'wall', 'cheese'];
-			let level = new URL(location.href).searchParams.get('level');
-			let levelId;
-			if (!level) {
-				const levels = await fetch('levels.json').then(response => response.json());
-				levelId = Math.floor(Date.now() / 86400000 + 1) % levels.length;
-				level = levels[levelId];
-			} else {
-				const solution = level
-					.replaceAll('.', '0000000000')
-					.split('')
-					.map(c => items[c - 1] || '');
-				const deck = {};
-				const unsolved = solution.map(cell => {
-					if (immutable.includes(cell)) return cell;
-					else {
-						if (cell) deck[cell] = (deck[cell] || 0) + 1;
-						return '';
-					}
-				});
-				level = [unsolved, solution, deck];
-			}
-			const cheeseCount = level[0].filter(cell => cell === 'cheese').length;
-			const deckItems = Object.entries(level[2]).flatMap(([type, count]) => Array.from({ length: count }, () => type));
-			const hintCount = level[1].filter((cell, i) => cell != level[0][i]).length;
-			let initialState = level[0].map(cell => ({ type: cell, rotation: 0 }));
+			const deckItems = items.concat(['']);
+			let initialState = Array.from({ length: 100 }, () => ({ type: null, rotation: 0 }));
 
 			const startTime = Date.now();
 			let interval = null;
@@ -149,9 +121,7 @@
 			const toggleBtn = document.getElementById('toggle');
 			const stepBtn = document.getElementById('step');
 			const resetBtn = document.getElementById('reset');
-			const hintBtn = document.getElementById('hint');
-			let cheese = 0;
-			let hints = [];
+			const shareBtn = document.getElementById('share');
 
 			function createDeck() {
 				deck.innerHTML = '';
@@ -182,22 +152,12 @@
 					div.id = `cell-${i}`;
 					if (cell.type) {
 						div.setAttribute('type', cell.type);
-						if (!immutable.includes(cell.type)) {
-							div.setAttribute('draggable', 'true');
-							div.addEventListener('dragstart', dragstart);
-						}
+						div.setAttribute('draggable', 'true');
+						div.addEventListener('dragstart', dragstart);
 					}
 					if (cell.rotation) {
 						div.setAttribute('rotation', cell.rotation);
 						div.style.transform = `rotate(${div.getAttribute('rotation')}deg)`;
-					}
-
-					if (hints.includes(i)) {
-						const hint = document.createElement('div');
-						hint.className = 'hint';
-						hint.setAttribute('type', level[1][i]);
-						hint.style.opacity = '0.5';
-						div.appendChild(hint);
 					}
 
 					div.addEventListener('click', () => {
@@ -220,7 +180,7 @@
 
 			function drop(e) {
 				e.preventDefault();
-				move(document.getElementById(e.dataTransfer.getData('id')), e.target.classList.contains('hint') ? e.target.parentElement : e.target);
+				move(document.getElementById(e.dataTransfer.getData('id')), e.target);
 			}
 
 			function move(from, to) {
@@ -228,17 +188,20 @@
 				const type = from.getAttribute('type');
 				const rotation = from.getAttribute('rotation') || '0';
 
-				if (to.hasAttribute('type')) {
-					from.setAttribute('type', to.getAttribute('type'));
-					from.setAttribute('rotation', to.getAttribute('rotation') || '0');
-					from.style.transform = `rotate(${from.getAttribute('rotation')}deg)`;
-				} else {
-					from.removeAttribute('type');
-					from.removeAttribute('rotation');
-					from.removeAttribute('draggable');
-					from.removeEventListener('dragstart', dragstart);
+				if (!from.id.startsWith('deck-cell')) {
+					if (to.hasAttribute('type')) {
+						from.setAttribute('type', to.getAttribute('type'));
+						from.setAttribute('rotation', to.getAttribute('rotation') || '0');
+						from.style.transform = `rotate(${from.getAttribute('rotation')}deg)`;
+					} else {
+						from.removeAttribute('type');
+						from.removeAttribute('rotation');
+						from.removeAttribute('draggable');
+						from.removeEventListener('dragstart', dragstart);
+					}
 				}
 
+				if (to.id.startsWith('deck-cell')) return;
 				to.setAttribute('type', type);
 				to.setAttribute('rotation', rotation);
 				to.style.transform = `rotate(${to.getAttribute('rotation')}deg)`;
@@ -338,43 +301,6 @@
 
 				switch (to.getAttribute('type')) {
 					case 'cheese':
-						if (++cheese >= cheeseCount) {
-							document.querySelector('.controls').style.display = 'none';
-							deck.style.display = 'none';
-							grid.classList.remove('grid');
-							grid.style.padding = '30px';
-							const text = `[🐀 Ratbox ${levelId ? '#' + (levelId + 1) : ''}]
-💡 ${hints.length}/${hintCount} hints used
-⬛ ${deckItems.length - Array.from(deck.children).filter(c => c.hasAttribute('type')).length}/${deckItems.length} items used
-📆 ${new Date().toLocaleDateString()}
-⏱️ ${Math.floor((Date.now() - startTime) / 60000)}m ${Math.floor(((Date.now() - startTime) / 1000) % 60)}s
-✅ ${initialState.every((cell, i) => cell.type == level[1][i]) ? 'intended' : 'unintended'} solution
-🌐 ${location.href}`;
-							grid.innerHTML = `<h1>You win!</h1><pre><code>${text}</code></pre>`;
-							const copy = document.createElement('button');
-							copy.textContent = 'Copy';
-							copy.addEventListener('click', () => {
-								navigator.clipboard.writeText(text);
-								copy.textContent = 'Copied!';
-							});
-							grid.appendChild(copy);
-
-							(function frame() {
-								confetti({
-									particleCount: 1,
-									angle: 0,
-									origin: { x: 0, y: 0 }
-								});
-
-								confetti({
-									particleCount: 1,
-									angle: -90,
-									origin: { x: 1, y: 0 }
-								});
-
-								requestAnimationFrame(frame);
-							})();
-						}
 					case null:
 						to.setAttribute('type', cell.getAttribute('type'));
 						to.setAttribute('rotation', cell.getAttribute('rotation') || '0');
@@ -438,35 +364,26 @@
 					toggleBtn.textContent = 'Play';
 					resetBtn.textContent = 'Clear';
 					createGrid();
-					cheese = 0;
 				} else {
-					initialState = level[0].map(cell => ({ type: cell, rotation: 0 }));
+					initialState = Array.from({ length: 100 }, () => ({ type: null, rotation: 0 }));
 					createGrid();
 					createDeck();
 				}
 			});
 
-			hintBtn.addEventListener('click', () => {
-				if (hints.length >= hintCount) {
-					alert('No more hints available!');
-					return;
-				}
-				if (!confirm('Are you sure you want to stoop so low as to use a hint?\n(Hints are not rotated)')) return;
-				const cells = Array.from(grid.children);
-				const indexMap = Array.from({ length: cells.length }, (_, i) => i).sort(() => Math.random() - 0.5);
-				for (let i = 0; i < cells.length; i++) {
-					const index = indexMap[i];
-					const cell = cells[index];
-					if (level[1][index] != (cell.getAttribute('type') || '') && cell.children.length === 0) {
-						hints.push(index);
-						const hint = document.createElement('div');
-						hint.className = 'hint';
-						hint.setAttribute('type', level[1][index]);
-						hint.style.opacity = '0.5';
-						cell.appendChild(hint);
-						return;
-					}
-				}
+			shareBtn.addEventListener('click', () => {
+				navigator.clipboard
+					.writeText(
+						location.origin +
+							'?level=' +
+							Array.from(grid.children)
+								.map(cell => items.indexOf(cell.getAttribute('type')) + 1)
+								.join('')
+								.replaceAll('0000000000', '.')
+					)
+					.then(() => {
+						alert('Level link copied to clipboard! Send it to @felix pls');
+					});
 			});
 
 			createGrid();
@@ -480,7 +397,7 @@
 			<button id="toggle">Play</button>
 			<button id="step">Step</button>
 			<button id="reset">Clear</button>
-			<button id="hint">Hint</button>
+			<button id="share">Share</button>
 		</div>
 	</body>
 </html>
