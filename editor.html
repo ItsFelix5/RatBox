@@ -374,7 +374,7 @@
 			shareBtn.addEventListener('click', () => {
 				navigator.clipboard
 					.writeText(
-						location.origin +
+						location.href.replace('editor', '').replace('.html', '') +
 							'?level=' +
 							Array.from(grid.children)
 								.map(cell => items.indexOf(cell.getAttribute('type')) + 1)
